@@ -999,9 +999,9 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 					data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&captcha_key=%s&captcha_sid=%s&access_token=%s",
 						link, escapedName, neturl.QueryEscape(captchaKey), captchaErr.CaptchaSid, token1)
 				} else {
-					// Новый метод VK ID (Слайдер / PoW) — полностью убираем упоминания captcha_sid и captcha_key
-					data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
-						link, escapedName, neturl.QueryEscape(successToken), captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+					// Новый метод VK ID (Слайдер / PoW) — теперь без лишних пустых параметров captcha_ts, captcha_sid и captcha_key
+					data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&is_sound_captcha=0&success_token=%s&captcha_attempt=%s&access_token=%s",
+						link, escapedName, neturl.QueryEscape(successToken), captchaErr.CaptchaAttempt, token1)
 				}
 				continue
 			}
