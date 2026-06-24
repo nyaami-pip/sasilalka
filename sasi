@@ -305,7 +305,7 @@ func ParseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 	// Extract captcha_sid
 	var captchaSid string
 	if sidRaw, exists := errData["captcha_sid"]; exists {
-		if sidStr, ok := sidRaw["captcha_sid"].(string); ok {
+		if sidStr, ok := sidRaw.(string); ok {
 			captchaSid = sidStr
 		} else if sidNum, ok2 := sidRaw.(float64); ok2 {
 			captchaSid = fmt.Sprintf("%.0f", sidNum)
