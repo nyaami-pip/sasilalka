@@ -286,95 +286,76 @@ type VkCaptchaError struct {
 	CaptchaAttempt          string
 }
 
-func ParseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
-	// Extract error_code
-	codeFloat, ok := errData["error_code"].(float64)
-	if !ok {
-		log.Printf("missing error_code in captcha error data")
-		return nil
-	}
-	code := int(codeFloat)
-
-	// Extract redirect_uri
-	RedirectURI, ok := errData["redirect_uri"].(string)
-	if !ok {
-		log.Printf("missing redirect_uri in captcha error data")
+func ParseVkCaptchaError(errObj map[string]interface{}) *VkCaptchaError {
+	if errObj == nil {
 		return nil
 	}
 
-	// Extract captcha_sid
-	var captchaSid string
-	if sidRaw, exists := errData["captcha_sid"]; exists {
+	// Проверяем, что это ошибка каптчи (код 14)
+	errCodeRaw, ok := errObj["error_code"]
+	if !ok {
+		return nil
+	}
+
+	var errorCode int
+	switch v := errCodeRaw.(type) {
+	case float64:
+		errorCode = int(v)
+	case int:
+		errorCode = v
+	default:
+		return nil
+	}
+
+	if errorCode != 14 {
+		return nil
+	}
+
+	// Создаем структуру для возврата
+	captchaErr := &VkCaptchaError{
+		ErrorCode: errorCode,
+	}
+
+	if errMsg, ok := errObj["error_msg"].(string); ok {
+		captchaErr.ErrorMsg = errMsg
+	}
+
+	// 1. Пытаемся достать старый captcha_sid (если он есть)
+	if sidRaw, exists := errObj["captcha_sid"]; exists {
 		if sidStr, ok := sidRaw.(string); ok {
-			captchaSid = sidStr
-		} else if sidNum, ok2 := sidRaw.(float64); ok2 {
-			captchaSid = fmt.Sprintf("%.0f", sidNum)
+			captchaErr.CaptchaSid = sidStr
+		} else if sidNum, ok := sidRaw.(float64); ok {
+			captchaErr.CaptchaSid = fmt.Sprintf("%.0f", sidNum)
 		}
 	}
 
-	// Extract captcha_img
-	captchaImg, ok := errData["captcha_img"].(string)
-	if !ok {
-		log.Printf("missing captcha_img in captcha error data")
-		return nil
-	}
+	// 2. Достаем redirect_uri (он критически важен для новой каптчи VK ID)
+	if redirectURIRaw, exists := errObj["redirect_uri"]; exists {
+		if redirectURIStr, ok := redirectURIRaw.(string); ok {
+			captchaErr.RedirectURI = redirectURIStr
 
-	// Extract error_msg
-	errorMsg, ok := errData["error_msg"].(string)
-	if !ok {
-		log.Printf("missing error_msg in captcha error data")
-		return nil
-	}
-
-	// Extract session token if redirect_uri present
-	var sessionToken string
-	if RedirectURI != "" {
-		if parsed, err := neturl.Parse(RedirectURI); err == nil {
-			sessionToken = parsed.Query().Get("session_token")
-		} else {
-			log.Printf("failed to parse redirect_uri: %v", err)
-			return nil
+			// Автоматически вырезаем session_token из redirect_uri, если его нет отдельным полем
+			if u, err := neturl.Parse(redirectURIStr); err == nil {
+				if token := u.Query().Get("session_token"); token != "" {
+					captchaErr.SessionToken = token
+				}
+			}
 		}
 	}
 
-	// Extract is_sound_captcha_available
-	isSound, ok := errData["is_sound_captcha_available"].(bool)
-	if !ok {
-		isSound = false
+	// 3. Если session_token пришел отдельным полем в корне (на всякий случай)
+	if tokenRaw, exists := errObj["session_token"]; exists {
+		if tokenStr, ok := tokenRaw.(string); ok {
+			captchaErr.SessionToken = tokenStr
+		}
 	}
 
-	// Extract captcha_ts
-	var captchaTs string
-	if tsFloat, ok := errData["captcha_ts"].(float64); ok {
-		captchaTs = fmt.Sprintf("%.0f", tsFloat)
-	} else if tsStr, ok := errData["captcha_ts"].(string); ok {
-		captchaTs = tsStr
-	}
-
-	// Extract captcha_attempt
-	var captchaAttempt string
-	if attFloat, ok := errData["captcha_attempt"].(float64); ok {
-		captchaAttempt = fmt.Sprintf("%.0f", attFloat)
-	} else if attStr, ok := errData["captcha_attempt"].(string); ok {
-		captchaAttempt = attStr
-	}
-
-	// Build VkCaptchaError
-	return &VkCaptchaError{
-		ErrorCode:               code,
-		ErrorMsg:                errorMsg,
-		CaptchaSid:              captchaSid,
-		CaptchaImg:              captchaImg,
-		RedirectURI:             RedirectURI,
-		IsSoundCaptchaAvailable: isSound,
-		SessionToken:            sessionToken,
-		CaptchaTs:               captchaTs,
-		CaptchaAttempt:          captchaAttempt,
-	}
+	return captchaErr
 }
 
 func (e *VkCaptchaError) IsCaptchaError() bool {
-	return e.ErrorCode == 14 && e.RedirectURI != "" && e.SessionToken != ""
+	// Ошибка валидна, если код 14 И у нас есть ЛИБО старый sid, ЛИБО новый redirect_uri/session_token
+	return e.ErrorCode == 14 && (e.CaptchaSid != "" || e.RedirectURI != "" || e.SessionToken != "")
 }
 
 func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError, streamID int, client tlsclient.HttpClient, profile Profile, useSliderPOC bool) (string, error) {
